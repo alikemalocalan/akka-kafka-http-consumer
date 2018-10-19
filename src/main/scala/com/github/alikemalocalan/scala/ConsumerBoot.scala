@@ -14,9 +14,9 @@ object ConsumerBoot extends App {
   val consumerConf = KafkaConsumer.Conf(
     new StringDeserializer,
     new StringDeserializer,
-    groupId = "test_group",
-    enableAutoCommit = false,
-    autoOffsetReset = OffsetResetStrategy.EARLIEST)
+    groupId = config.getString("groupId"),
+    autoOffsetReset = OffsetResetStrategy.EARLIEST
+  )
     .withConf(config)
 
   val actorConf = KafkaConsumerActor.Conf(1.seconds, 3.seconds)
