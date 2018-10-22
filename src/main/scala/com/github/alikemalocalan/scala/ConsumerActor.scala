@@ -1,48 +1,35 @@
 package com.github.alikemalocalan.scala
 
-import akka.actor.{Actor, ActorLogging, ActorRef, OneForOneStrategy, Props, SupervisorStrategy, Terminated}
-import akka.routing.{ActorRefRoutee, RoundRobinRoutingLogic, Router}
+import akka.actor.SupervisorStrategy.{Escalate, Restart, Stop}
+import akka.actor.{Actor, ActorLogging, ActorRef, OneForOneStrategy, Props, SupervisorStrategy}
 import cakesolutions.kafka.akka.KafkaConsumerActor.{Confirm, Subscribe}
-import cakesolutions.kafka.akka.{ConsumerRecords, Extractor, KafkaConsumerActor}
+import cakesolutions.kafka.akka.{ConsumerRecords, KafkaConsumerActor}
+import org.apache.kafka.common.KafkaException
+import org.apache.kafka.common.config.ConfigException
 
 
 class ConsumerActor extends Actor with ActorLogging with Config {
 
-  val recordsExt: Extractor[Any, ConsumerRecords[String, String]] = ConsumerRecords.extractor[String, String]
-  val consumer: ActorRef = context.actorOf(KafkaConsumerActor.props(consumerConf, actorConf, self))
+  //Type of Records
+  val recordsExt = ConsumerRecords.extractor[String, String]
+  val consumer: ActorRef = context.actorOf(KafkaConsumerActor.props(kafkaConsumerConf, actorConf, self))
 
-  var workerActorRouter: Router = {
-    val routees = Vector.fill(5) {
-      val r = context.actorOf(Props(new HttpSenderActor()))
-      context.watch(r)
-      ActorRefRoutee(r)
-    }
-    Router(RoundRobinRoutingLogic(), routees)
+  var actorOfHttpSender: ActorRef = context.actorOf(Props(new HttpSenderActor()))
+
+  override def supervisorStrategy: SupervisorStrategy = OneForOneStrategy(maxNrOfRetries = 3) {
+    case _: KafkaConsumerActor.ConsumerException => Restart
+    case _:ConfigException => Stop
+    case _:KafkaException => Stop
+    case _ => Escalate
   }
 
-  override def supervisorStrategy: SupervisorStrategy = OneForOneStrategy(maxNrOfRetries = 5) {
-    case _: KafkaConsumerActor.ConsumerException =>
-      log.info("Consumer exception caught. Restarting consumer.")
-      SupervisorStrategy.Restart
-    case _ => SupervisorStrategy.Escalate
-  }
-
-  consumer ! Subscribe.AutoPartition(List("logs_broker"))
+  consumer ! Subscribe.AutoPartition(List(kafkaTopic))
 
   override def receive: Receive = {
-
     // Records from Kafka
-    case recordsExt(records) => {
-      records.values.foreach(workerActorRouter.route(_, sender()))
+    case recordsExt(records) =>
+      records.values.foreach(actorOfHttpSender ! _)
       sender() ! Confirm(records.offsets, commit = true)
-    }
-    case Terminated(s) =>
-      log.error(s"${s.toString()} is terminated and will be killed.")
-      workerActorRouter = workerActorRouter.removeRoutee(s)
-      val r = context.actorOf(Props(new HttpSenderActor()))
-      context.watch(r)
-      workerActorRouter = workerActorRouter.addRoutee(r)
-
     case _ => log.error("Not known type as incoming message")
   }
 }

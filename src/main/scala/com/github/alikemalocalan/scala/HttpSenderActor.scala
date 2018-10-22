@@ -1,9 +1,9 @@
 package com.github.alikemalocalan.scala
 
-import akka.actor.SupervisorStrategy.{Escalate, Restart, Stop}
+import akka.actor.SupervisorStrategy.{Escalate, Restart}
 import akka.actor.{Actor, ActorLogging, OneForOneStrategy}
 import akka.http.scaladsl.Http
-import akka.http.scaladsl.model.{HttpRequest, _}
+import akka.http.scaladsl.model.{ContentTypes, HttpEntity, HttpMethods, HttpRequest}
 
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
@@ -15,9 +15,8 @@ class HttpSenderActor extends Actor with ActorLogging with Config {
   implicit val system = context.system
 
   override val supervisorStrategy: OneForOneStrategy =
-    OneForOneStrategy(maxNrOfRetries = 10, withinTimeRange = 1 minute) {
-      case _: NullPointerException => Restart
-      case _: java.util.concurrent.ExecutionException => Stop
+    OneForOneStrategy(maxNrOfRetries = 5, withinTimeRange = 1 minute) {
+      case _: java.net.ConnectException => Restart
       case _: Exception => Escalate
     }
 
